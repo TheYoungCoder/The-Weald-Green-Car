@@ -1,0 +1,200 @@
+//           Fault Truth Table
+// Flag State     Fault Description     Disable Outputs     Latched Until Reset
+// FF1     FF2
+// L     L     No fault           No             No
+// L     H     Short Circuit           Yes             Yes
+// H     L     Over Temperature      No             No
+// H     H     Under Voltage           Yes             No
+
+
+//           Motor Driver Truth Table
+// PWMH PWML     DIR     OUTA     OUTB     Operation
+// H     H     L     GND     V+     Forward
+// H     H     H     V+     GND     Backward
+// L     H     X     GND     GND     Brake Low
+// H     L     X     V+     V+     Brake High
+// L     L     X     Z     Z     Coast
+
+#include <PWM.h>
+
+int pwm_h_l_pin              = 9;
+int motor_direction          = 11;
+int motor_controller_reset    = 5;
+int direction_pin            = 6;
+int fault_1_pin              = 7;
+int fault_2_pin              = 8;
+
+int forwards                 = 0;
+int backwards                = 1;
+
+int forward_button_pin       = 2;
+int reverse_button_pin       = 3;
+
+int acceleration_time        = 5000;
+int duty_cycle               = 5;
+int frequency                = 30000;
+int forward_max_speed        = 100;
+int reverse_max_speed        = 20;
+
+
+void coasting()
+{
+  int duty_cycle = 0;
+  pwmWrite(pwm_h_l_pin, duty_cycle);
+  Serial.println("Coasting");
+  Serial.println("");
+}
+
+
+
+void fault()
+{
+  Serial.println("");
+  Serial.println("Motor Controller Fault");
+  Serial.println("Checking Nibble...");
+  Serial.println("");
+  delay(1000);
+
+  if(digitalRead(fault_1_pin) == 0 && digitalRead(fault_2_pin) == 1)
+  {
+    Serial.println("Short Circuit");
+    Serial.println("The outputs have been disabled");
+    Serial.println("Latched Until Reset");
+    Serial.println("");
+    fault_resolved_check();
+  }
+
+  if(digitalRead(fault_1_pin) == 1 && digitalRead(fault_2_pin) == 0)
+  {
+    Serial.println("Over Heating");
+    Serial.println("");
+    fault_resolved_check();
+  }
+
+  if(digitalRead(fault_1_pin) == 1 && digitalRead(fault_2_pin) == 1)
+  {
+    Serial.println("Under Voltage");
+    Serial.println("The outputs have been disabled");
+    Serial.println("");
+    fault_resolved_check();
+  }
+}
+
+
+
+void fault_resolved_check()
+{
+  while(digitalRead(fault_1_pin) + digitalRead(fault_2_pin) > 0)
+  {
+    delay(100);
+    if(digitalRead(fault_1_pin) + digitalRead(fault_2_pin) == 0)
+    {
+      Serial.println("Problem Resolved");
+      Serial.println("");
+      break;
+    }
+  }
+}
+
+
+
+void setup()
+{
+  Serial.begin(9600);
+
+  Serial.print("Soft Start Lenth (s):          ");
+  Serial.println(acceleration_time / 1000);
+  Serial.print("Motor's PWM Frequency (hertz): ");
+  Serial.println(frequency);
+  Serial.println("");
+
+  pinMode(direction_pin, OUTPUT);
+
+  pinMode(forward_button_pin, INPUT_PULLUP);
+  pinMode(reverse_button_pin, INPUT_PULLUP);
+
+  pinMode(fault_1_pin, INPUT);
+  pinMode(fault_2_pin, INPUT);
+
+  InitTimersSafe();
+  bool success = SetPinFrequencySafe(pwm_h_l_pin, frequency);
+}
+
+
+
+void loop()
+{
+  if(digitalRead(fault_1_pin) == 1 || digitalRead(fault_2_pin) == 1)
+  {
+    fault();
+  }
+
+  if(digitalRead(reverse_button_pin) == 0)
+  {
+    Serial.println("Starting (backwards)");
+
+    digitalWrite(motor_direction, backwards);
+
+    for(int duty_cycle = 1; duty_cycle <= reverse_max_speed; duty_cycle ++)
+    {
+      if(digitalRead(reverse_button_pin) == 1)
+      {
+        coasting();
+        break;
+      }
+      if(digitalRead(fault_1_pin) == 1 || digitalRead(fault_2_pin) == 1)
+      {
+        fault();
+      }
+
+      Serial.print("Duty Cycle: ");
+      Serial.println(duty_cycle);
+
+      pwmWrite(pwm_h_l_pin, duty_cycle * 2.55);
+      delay(acceleration_time / reverse_max_speed);
+    }
+  }
+
+  if(digitalRead(forward_button_pin) == 0)
+  {
+    Serial.println("Starting (forwards)");
+
+    digitalWrite(motor_direction, forwards);
+
+    for(int duty_cycle = 1; duty_cycle <= forward_max_speed; duty_cycle ++)
+    {
+      if(digitalRead(forward_button_pin) == 1)
+      {
+        coasting();
+        break;
+      }
+      if(digitalRead(fault_1_pin) == 1 || digitalRead(fault_2_pin) == 1)
+      {
+        fault();
+        break;
+      }
+
+      Serial.print("Duty Cycle: ");
+      Serial.println(duty_cycle);
+
+      pwmWrite(pwm_h_l_pin, duty_cycle * 2.55);
+      delay(acceleration_time / forward_max_speed);
+    }
+
+    while(digitalRead(forward_button_pin) == 0)
+    {
+      pwmWrite(pwm_h_l_pin, forward_max_speed * 2.55);
+
+      if(digitalRead(forward_button_pin) == 1)
+      {
+        coasting();
+        break;
+      }
+      if(digitalRead(fault_1_pin) == 1 || digitalRead(fault_2_pin) == 1)
+      {
+        fault();
+        break;
+      }
+    }
+  }
+}
